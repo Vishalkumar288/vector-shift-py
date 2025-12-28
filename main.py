@@ -1,56 +1,50 @@
-# The line `from fastapi import FastAPI, Form` is importing the `FastAPI` class and the `Form` class
-# from the `fastapi` module in Python. This allows you to use these classes in your code to create
-# FastAPI applications and handle form data in your API endpoints.
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List
+from collections import defaultdict, deque
+from typing import List, Dict, Any
 
 app = FastAPI()
 
-class Node(BaseModel):
-    id: str
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-class Edge(BaseModel):
-    source: str
-    target: str
+class PipelinePayload(BaseModel):
+    nodes: List[Dict[str, Any]]
+    edges: List[Dict[str, Any]]
 
-class Pipeline(BaseModel):
-    nodes: List[Node]
-    edges: List[Edge]
+def is_dag(nodes, edges) -> bool:
+    graph = defaultdict(list)
+    indegree = {node["id"]: 0 for node in nodes}
 
-def is_dag(nodes, edges):
-    graph = {n.id: [] for n in nodes}
-    for e in edges:
-        graph[e.source].append(e.target)
+    for edge in edges:
+        graph[edge["source"]].append(edge["target"])
+        indegree[edge["target"]] += 1
 
-    visited = set()
-    stack = set()
+    queue = deque([n for n in indegree if indegree[n] == 0])
+    visited = 0
 
-    def dfs(node):
-        if node in stack:
-            return False
-        if node in visited:
-            return True
+    while queue:
+        node = queue.popleft()
+        visited += 1
+        for neighbor in graph[node]:
+            indegree[neighbor] -= 1
+            if indegree[neighbor] == 0:
+                queue.append(neighbor)
 
-        stack.add(node)
-        for nei in graph.get(node, []):
-            if not dfs(nei):
-                return False
-        stack.remove(node)
-        visited.add(node)
-        return True
-
-    return all(dfs(n.id) for n in nodes)
+    return visited == len(nodes)
 
 @app.post("/pipelines/parse")
-def parse_pipeline(pipeline: Pipeline):
-    num_nodes = len(pipeline.nodes)
-    num_edges = len(pipeline.edges)
-    dag = is_dag(pipeline.nodes, pipeline.edges)
+def parse_pipeline(payload: PipelinePayload):
+    nodes = payload.nodes
+    edges = payload.edges
 
     return {
-        "num_nodes": num_nodes,
-        "num_edges": num_edges,
-        "is_dag": dag
+        "num_nodes": len(nodes),
+        "num_edges": len(edges),
+        "is_dag": is_dag(nodes, edges),
     }
-
